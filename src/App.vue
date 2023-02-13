@@ -1,3 +1,5 @@
+<!-- refact error show -->
+
 <template>
     <div class="container mx-auto flex flex-col items-center bg-gray-100 p-4">
         <div
@@ -58,16 +60,21 @@
                                 v-for="coin in relevantCoins"
                                 :key="coin.Name"
                                 class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-                                @click="onTipClick(coin.Name)"
+                                @click="onHintClick(coin.Name)"
                             >
                                 {{ coin.Name }}
                             </span>
                         </div>
                         <div
-                            v-if="isTickerExist"
+                            v-if="isTickerIncluded || !isTickerExist"
                             class="text-sm text-red-600"
                         >
-                            Такой тикер уже добавлен
+                            <template v-if="isTickerIncluded">
+                                Такой тикер уже добавлен
+                            </template>
+                            <template v-if="!isTickerExist">
+                                Тикер не существует
+                            </template>
                         </div>
                     </div>
                 </div>
@@ -127,10 +134,11 @@
                     <div
                         v-for="t in paginatedTickers"
                         :key="t.name"
-                        :class="{
-                            'border-4': selectedTicker === t,
-                        }"
-                        class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
+                        :class="[
+                            { 'border-4': selectedTicker === t },
+                            t.isAvailable ? 'bg-white' : 'bg-red-100',
+                        ]"
+                        class="overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
                         @click="selectTicker(t)"
                     >
                         <div class="px-4 py-5 sm:p-6 text-center">
@@ -219,7 +227,11 @@
 </template>
 
 <script>
-import { subscribeToTicker, unsubscribeFromTicker } from './api';
+import {
+    loadAllCoinsList,
+    subscribeToTicker,
+    unsubscribeFromTicker,
+} from './api';
 export default {
     data() {
         return {
@@ -229,18 +241,20 @@ export default {
             graph: [],
             coinList: [],
             isLoading: true,
-            isTickerExist: false,
+            isTickerIncluded: false,
+            isTickerExist: true,
             relevantCoins: [],
             filter: '',
             page: 1,
+			tickersPerPage: 10,
         };
     },
     computed: {
         startIndex() {
-            return 6 * (this.page - 1);
+            return this.tickersPerPage * (this.page - 1);
         },
         endIndex() {
-            return this.page * 6;
+            return this.page * this.tickersPerPage;
         },
         hasNextPage() {
             return this.filteredTickers.length > this.endIndex;
@@ -268,6 +282,9 @@ export default {
                 page: this.page,
                 filter: this.filter,
             };
+        },
+        isErrorShowed() {
+            return this.isTickerIncluded || !this.isTickerExist;
         },
     },
     watch: {
@@ -297,17 +314,7 @@ export default {
             }
         },
     },
-    created() {
-        const fetchCoins = async () => {
-            const f = await fetch(
-                'https://min-api.cryptocompare.com/data/all/coinlist'
-            );
-            const res = await f.json();
-            this.coinList = Object.values(res.Data);
-            this.isLoading = false;
-        };
-        fetchCoins();
-
+    async created() {
         const tickersData = localStorage.getItem('cryptonomicon-list');
         if (tickersData) {
             this.tickers = JSON.parse(tickersData);
@@ -329,6 +336,9 @@ export default {
         if (windowData.page) {
             this.page = windowData.page;
         }
+
+        this.coinList = await loadAllCoinsList();
+        this.isLoading = false;
     },
     methods: {
         updateTicker(tickerName, price) {
@@ -337,6 +347,7 @@ export default {
                 .forEach(t => {
                     if (!price) {
                         t.price = '-';
+                        t.isAvailable = false;
                         return;
                     }
                     t.price =
@@ -347,24 +358,11 @@ export default {
                     }
                 });
         },
-        addFromField(t) {
-            const noTickerInData = !this.coinList.some(
-                c => c.Name.toUpperCase() === t.toUpperCase()
-            );
-
-            if (noTickerInData) {
-                console.log('Нет такого тикера');
-            } else {
-                this.checkExist(t);
-                if (!this.isTickerExist) {
-                    this.add(t);
-                }
-            }
-        },
         add(addedTicker) {
             const currentTicker = {
                 name: addedTicker.toUpperCase(),
                 price: '-',
+				isAvailable: true,
             };
             this.tickers = [...this.tickers, currentTicker];
             subscribeToTicker(currentTicker.name, price =>
@@ -372,17 +370,34 @@ export default {
             );
             this.ticker = '';
             this.filter = '';
+			this.relevantCoins = [];
         },
-        onTipClick(t) {
-            this.checkExist(t);
+        addFromField(t) {
+            this.isTickerExist = this.coinList.some(
+                c => c.Name.toUpperCase() === t.toUpperCase()
+            );
+
             if (!this.isTickerExist) {
+                console.log('Нет такого тикера');
+                return;
+            }
+
+            this.checkIncluded(t);
+            if (!this.isTickerIncluded) {
                 this.add(t);
-            } else {
-                this.ticker = t;
             }
         },
-        checkExist(checkingTicker) {
-            this.isTickerExist = this.tickers.some(
+        onHintClick(t) {
+            this.checkIncluded(t);
+            if (this.isTickerIncluded) {
+                this.ticker = t;
+                return;
+            }
+
+            this.add(t);
+        },
+        checkIncluded(checkingTicker) {
+            this.isTickerIncluded = this.tickers.some(
                 t => t.name.toUpperCase() === checkingTicker.toUpperCase()
             );
         },
@@ -402,9 +417,9 @@ export default {
             this.selectedTicker = ticker;
         },
         onFieldInput() {
-            if (this.isTickerExist) {
-                this.isTickerExist = false;
-            }
+            this.isTickerExist = true;
+            this.isTickerIncluded = false;
+
             if (this.ticker) {
                 this.relevantCoins = this.coinList
                     .filter(coin =>
