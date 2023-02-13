@@ -185,10 +185,12 @@
                     {{ selectedTicker.name }} - USD
                 </h3>
                 <div
+                    ref="graph"
                     class="flex items-end border-gray-600 border-b border-l h-64"
                 >
                     <div
                         v-for="(bar, idx) in normalizedGraph"
+                        ref="graphElement"
                         :key="idx"
                         :style="{ height: `${bar}%` }"
                         class="bg-purple-800 border w-10"
@@ -227,6 +229,7 @@
 </template>
 
 <script>
+import { nextTick } from 'vue';
 import {
     loadAllCoinsList,
     subscribeToTicker,
@@ -246,7 +249,9 @@ export default {
             relevantCoins: [],
             filter: '',
             page: 1,
-			tickersPerPage: 10,
+            tickersPerPage: 10,
+            maxGraphElements: 0,
+            graphElementWidth: 0,
         };
     },
     computed: {
@@ -268,9 +273,11 @@ export default {
             return this.filteredTickers.slice(this.startIndex, this.endIndex);
         },
         normalizedGraph() {
-            const maxValue = Math.max(...this.graph);
-            const minValue = Math.min(...this.graph);
-            return this.graph.map(bar => {
+            const showedGraph = this.graph.slice(-1 * this.maxGraphElements);
+            const maxValue = Math.max(...showedGraph);
+            const minValue = Math.min(...showedGraph);
+
+            return showedGraph.map(bar => {
                 if (maxValue === minValue) {
                     return 100;
                 }
@@ -314,6 +321,12 @@ export default {
             }
         },
     },
+    mounted() {
+        window.addEventListener('resize', this.calculateMaxGraphElements);
+    },
+    unmounted() {
+        window.removeEventListener('resize', this.calculateMaxGraphElements);
+    },
     async created() {
         const tickersData = localStorage.getItem('cryptonomicon-list');
         if (tickersData) {
@@ -344,7 +357,7 @@ export default {
         updateTicker(tickerName, price) {
             this.tickers
                 .filter(t => t.name.toUpperCase() === tickerName.toUpperCase())
-                .forEach(t => {
+                .forEach(async t => {
                     if (!price) {
                         t.price = '-';
                         t.isAvailable = false;
@@ -355,6 +368,14 @@ export default {
 
                     if (this.selectedTicker?.name === t.name) {
                         this.graph.push(price);
+
+                        await nextTick();
+
+                        if (this.graph.length === 1) {
+                            this.graphElementWidth =
+                                this.$refs.graphElement[0].clientWidth;
+                            this.calculateMaxGraphElements();
+                        }
                     }
                 });
         },
@@ -362,7 +383,7 @@ export default {
             const currentTicker = {
                 name: addedTicker.toUpperCase(),
                 price: '-',
-				isAvailable: true,
+                isAvailable: true,
             };
             this.tickers = [...this.tickers, currentTicker];
             subscribeToTicker(currentTicker.name, price =>
@@ -370,7 +391,7 @@ export default {
             );
             this.ticker = '';
             this.filter = '';
-			this.relevantCoins = [];
+            this.relevantCoins = [];
         },
         addFromField(t) {
             this.isTickerExist = this.coinList.some(
@@ -431,6 +452,14 @@ export default {
             } else {
                 this.relevantCoins = [];
             }
+        },
+        calculateMaxGraphElements() {
+            if (!this.$refs.graph || this.graphElementWidth === 0) {
+                return;
+            }
+            this.maxGraphElements = Math.floor(
+                this.$refs.graph.clientWidth / this.graphElementWidth
+            );
         },
     },
 };
