@@ -8,25 +8,13 @@ const MessageType = {
 
 const tickersHandlers = new Map();
 const crossTradedTickerPrices = new Map(); //In BTC
-// DANK, AVA
+// SBTC, AVA
 
 const socket = new WebSocket(
     `wss://streamer.cryptocompare.com/v2?api_key=${API_KEY}`
 );
 
-socket.addEventListener(
-    'open',
-    () => {
-        console.log(`Подписываемся на usd`);
-        socket.send(
-            JSON.stringify({
-                'action': 'SubAdd',
-                'subs': [`5~CCCAGG~${BTC}~${USD}`],
-            })
-        );
-    },
-    { once: true }
-);
+let isBTCSubscribed = false;
 
 socket.addEventListener('message', e => {
     const {
@@ -58,6 +46,7 @@ socket.addEventListener('message', e => {
         }
 
         if (tosymbol === BTC) {
+            subscribeToTickerOnWs(BTC, USD);
             crossTradedTickerPrices.set(currency, newPrice);
             return;
         }
@@ -89,7 +78,11 @@ function sendToWs(message) {
 
 function subscribeToTickerOnWs(ticker, tosymbol = USD) {
     if (ticker === BTC) {
-        return;
+        if (isBTCSubscribed) {
+            return;
+        } else {
+            isBTCSubscribed = true;
+        }
     }
     sendToWs({
         'action': 'SubAdd',
@@ -98,6 +91,9 @@ function subscribeToTickerOnWs(ticker, tosymbol = USD) {
 }
 
 function unsubscribeToTickerOnWs(ticker, tosymbol = USD) {
+    if (ticker === BTC) {
+        isBTCSubscribed = false;
+    }
     sendToWs({
         'action': 'SubRemove',
         'subs': [`5~CCCAGG~${ticker}~${tosymbol}`],
@@ -115,8 +111,22 @@ export const subscribeToTicker = (ticker, cb) => {
 };
 
 export const unsubscribeFromTicker = ticker => {
+    if (ticker === BTC) {
+        if (!crossTradedTickerPrices.size) {
+            unsubscribeToTickerOnWs(ticker, USD);
+        }
+    } else if (crossTradedTickerPrices.get(ticker)) {
+        unsubscribeToTickerOnWs(ticker, BTC);
+        crossTradedTickerPrices.delete(ticker);
+
+        if (!crossTradedTickerPrices.size && !tickersHandlers.get(BTC)) {
+            unsubscribeToTickerOnWs(BTC, USD);
+        }
+    } else {
+        unsubscribeToTickerOnWs(ticker, USD);
+    }
+
     tickersHandlers.delete(ticker);
-    unsubscribeToTickerOnWs(ticker);
 };
 
 export const loadAllCoinsList = () => {
